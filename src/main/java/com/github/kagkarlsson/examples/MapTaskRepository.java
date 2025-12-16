@@ -1,27 +1,25 @@
 package com.github.kagkarlsson.examples;
 
-import com.github.kagkarlsson.scheduler.Clock;
-import com.github.kagkarlsson.scheduler.ScheduledExecutionsFilter;
-import com.github.kagkarlsson.scheduler.SystemClock;
-import com.github.kagkarlsson.scheduler.TaskRepository;
-import com.github.kagkarlsson.scheduler.TaskResolver;
+import com.github.kagkarlsson.scheduler.*;
 import com.github.kagkarlsson.scheduler.exceptions.TaskInstanceException;
-import com.github.kagkarlsson.scheduler.task.Execution;
-import com.github.kagkarlsson.scheduler.task.SchedulableInstance;
-import com.github.kagkarlsson.scheduler.task.ScheduledTaskInstance;
-import com.github.kagkarlsson.scheduler.task.TaskInstance;
+import com.github.kagkarlsson.scheduler.jdbc.AutodetectJdbcCustomization;
+import com.github.kagkarlsson.scheduler.jdbc.JdbcCustomization;
+import com.github.kagkarlsson.scheduler.serializer.Serializer;
+import com.github.kagkarlsson.scheduler.task.*;
+import com.github.kagkarlsson.shaded.jdbc.JdbcRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.sql.DataSource;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 public class MapTaskRepository implements TaskRepository {
@@ -34,12 +32,15 @@ public class MapTaskRepository implements TaskRepository {
     public static final String TASK_DATA = "task_data";
     public static final String EXECUTION_TIME = "execution_time";
     public static final String PICKED = "picked";
+    public static final String PICKED_BY = "picked_by";
     public static final String VERSION = "version";
     public static final String PRIORITY = "priority";
     //end
 
-    private final Clock clock = new SystemClock();
-    private final boolean orderByPriority = false;
+    private Clock clock = new SystemClock();
+    private boolean orderByPriority = false;
+
+    private SchedulerName schedulerSchedulerName;
 
     private final TaskResolver taskResolver;
 
@@ -47,6 +48,89 @@ public class MapTaskRepository implements TaskRepository {
 
     public MapTaskRepository(TaskResolver taskResolver) {
         this.taskResolver = taskResolver;
+    }
+
+
+    public MapTaskRepository(
+            DataSource dataSource,
+            boolean commitWhenAutocommitDisabled,
+            String tableName,
+            TaskResolver taskResolver,
+            SchedulerName schedulerSchedulerName,
+            boolean orderByPriority,
+            Clock clock) {
+        this(
+                dataSource,
+                commitWhenAutocommitDisabled,
+                new AutodetectJdbcCustomization(dataSource),
+                tableName,
+                taskResolver,
+                schedulerSchedulerName,
+                Serializer.DEFAULT_JAVA_SERIALIZER,
+                orderByPriority,
+                clock);
+    }
+
+    public MapTaskRepository(
+            DataSource dataSource,
+            boolean commitWhenAutocommitDisabled,
+            JdbcCustomization jdbcCustomization,
+            String tableName,
+            TaskResolver taskResolver,
+            SchedulerName schedulerSchedulerName,
+            boolean orderByPriority,
+            Clock clock) {
+        this(
+                dataSource,
+                commitWhenAutocommitDisabled,
+                jdbcCustomization,
+                tableName,
+                taskResolver,
+                schedulerSchedulerName,
+                Serializer.DEFAULT_JAVA_SERIALIZER,
+                orderByPriority,
+                clock);
+    }
+
+    public MapTaskRepository(
+            DataSource dataSource,
+            boolean commitWhenAutocommitDisabled,
+            JdbcCustomization jdbcCustomization,
+            String tableName,
+            TaskResolver taskResolver,
+            SchedulerName schedulerSchedulerName,
+            Serializer serializer,
+            boolean orderByPriority,
+            Clock clock) {
+        this(
+                jdbcCustomization,
+                tableName,
+                taskResolver,
+                schedulerSchedulerName,
+                serializer,
+                new JdbcRunner(dataSource, commitWhenAutocommitDisabled),
+                orderByPriority,
+                clock);
+    }
+
+    protected MapTaskRepository(
+            JdbcCustomization jdbcCustomization,
+            String tableName,
+            TaskResolver taskResolver,
+            SchedulerName schedulerSchedulerName,
+            Serializer serializer,
+            JdbcRunner jdbcRunner,
+            boolean orderByPriority,
+            Clock clock) {
+        //this.tableName = tableName;
+        this.taskResolver = taskResolver;
+        this.schedulerSchedulerName = schedulerSchedulerName;
+//        this.jdbcRunner = jdbcRunner;
+//        this.serializer = serializer;
+//        this.jdbcCustomization = jdbcCustomization;
+        this.orderByPriority = orderByPriority;
+        this.clock = clock;
+//        this.insertQuery = getInsertQuery(tableName);
     }
 
     @Override
@@ -77,7 +161,6 @@ public class MapTaskRepository implements TaskRepository {
             if (store.get(key) == null) {
 
                 Map<String, Object> taskInstanceMap = new LinkedHashMap<>();
-
                 fillTask(taskInstanceMap, instance);
                 store.put(key, taskInstanceMap);
 
@@ -115,21 +198,17 @@ public class MapTaskRepository implements TaskRepository {
     private Execution toExecution(Map<String, Object> in) {
 
         String taskName = (String) in.get(TASK_NAME);
-//
-//        Optional<Task> task = taskResolver.resolve(taskName);
-//        Supplier dataSupplier = () -> null;
-//        if (task.isPresent()) {
-//            dataSupplier = memoize(
-//                    () -> serializer.deserialize(task.get().getDataClass(), in.getTaskData()));
-//        }
-//
-//        TaskInstance taskInstance = new TaskInstance(taskName, in.getTaskInstance(), dataSupplier);
-//
-//        return new Execution(in.getExecutionTime(), taskInstance, in.isPicked(), in.getPickedBy(),
-//                        in.getLastSuccess(), in.getLastFailure(), in.getConsecutiveFailures(),
-//                        in.getLastHeartbeat(), in.getVersion());
 
-        return null;
+        Resolvable resolvableTaskName = Resolvable.of(taskName, (Instant) in.get(EXECUTION_TIME));
+
+        Optional<Task> task = taskResolver.resolve(resolvableTaskName);
+        Supplier dataSupplier = () -> null;
+
+        TaskInstance taskInstance = new TaskInstance(taskName, (String) in.get(TASK_INSTANCE), dataSupplier);
+
+        return new Execution((Instant) in.get(EXECUTION_TIME), taskInstance, (Boolean) in.get(PICKED), (String) in.get(PICKED_BY),
+                (Instant) in.get("last_success"), (Instant) in.get("last_failure"), (Integer) in.get("failures"),
+                (Instant) in.get("last_heartbeat"), (Long) in.get(VERSION));
     }
 
     @Override
@@ -148,91 +227,91 @@ public class MapTaskRepository implements TaskRepository {
 
     @Override
     public void createBatch(List<ScheduledTaskInstance> executions) {
-
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public Instant replace(Execution toBeReplaced, ScheduledTaskInstance newInstance) {
-        return null;
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public Instant replace(Execution toBeReplaced, SchedulableInstance<?> newInstance) {
-        return null;
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public void getScheduledExecutions(ScheduledExecutionsFilter filter, Consumer<Execution> consumer) {
-
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public void getScheduledExecutions(ScheduledExecutionsFilter filter, String taskName, Consumer<Execution> consumer) {
-
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public List<Execution> lockAndFetchGeneric(Instant now, int limit) {
-        return List.of();
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public List<Execution> lockAndGetDue(Instant now, int limit) {
-        return List.of();
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public void remove(Execution execution) {
-
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public boolean reschedule(Execution execution, Instant nextExecutionTime, Instant lastSuccess, Instant lastFailure, int consecutiveFailures) {
-        return false;
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public boolean reschedule(Execution execution, Instant nextExecutionTime, Object newData, Instant lastSuccess, Instant lastFailure, int consecutiveFailures) {
-        return false;
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public Optional<Execution> pick(Execution e, Instant timePicked) {
-        return Optional.empty();
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public List<Execution> getDeadExecutions(Instant olderThan) {
-        return List.of();
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public boolean updateHeartbeatWithRetry(Execution execution, Instant newHeartbeat, int tries) {
-        return false;
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public boolean updateHeartbeat(Execution execution, Instant heartbeatTime) {
-        return false;
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public List<Execution> getExecutionsFailingLongerThan(Duration interval) {
-        return List.of();
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public Optional<Execution> getExecution(String taskName, String taskInstanceId) {
-        return Optional.empty();
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public int removeExecutions(String taskName) {
-        return 0;
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
     public void verifySupportsLockAndFetch() {
-
+        throw new RuntimeException("Not implemented");
     }
 }

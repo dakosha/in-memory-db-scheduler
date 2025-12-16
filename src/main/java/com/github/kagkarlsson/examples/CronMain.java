@@ -41,6 +41,7 @@ public class CronMain extends Example {
                                     System.out.println(Instant.now().getEpochSecond() + "s 1 -  !" + Thread.currentThread().getName());
                                 });
 
+
 //        Schedule cron1 = Schedules.cron("*/1 * * * * *");
 //        RecurringTask<Void> cronTask1 =
 //                Tasks.recurring("cron-task-2", cron1)
@@ -57,13 +58,21 @@ public class CronMain extends Example {
 //                                    System.out.println(Instant.now().getEpochSecond() + "s 3 -  !" + Thread.currentThread().getName());
 //                                });
 
-        final Scheduler scheduler =
-                Scheduler.create(dataSource)
+        final MapScheduler mapScheduler =
+                MapScheduler.create1(dataSource)
                         .schedulerName(new SchedulerName.Fixed("Scheduler-1"))
                         .startTasks(cronTask)
                         .pollingInterval(Duration.ofSeconds(1))
                         .registerShutdownHook()
                         .build();
+
+//        final Scheduler scheduler =
+//                Scheduler.create(dataSource)
+//                        .schedulerName(new SchedulerName.Fixed("Scheduler-1"))
+//                        .startTasks(cronTask)
+//                        .pollingInterval(Duration.ofSeconds(1))
+//                        .registerShutdownHook()
+//                        .build();
 
 //        final Scheduler scheduler1 =
 //                Scheduler.create(dataSource)
@@ -81,7 +90,9 @@ public class CronMain extends Example {
 //                        .registerShutdownHook()
 //                        .build();
 
-        scheduler.start();
+        mapScheduler.start();
+
+//        scheduler.start();
 //        scheduler1.start();
 //        scheduler2.start();
     }
