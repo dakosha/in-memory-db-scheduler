@@ -35,6 +35,10 @@ public class MapTaskRepository implements TaskRepository {
     public static final String PICKED_BY = "picked_by";
     public static final String VERSION = "version";
     public static final String PRIORITY = "priority";
+    public static final String LAST_SUCCESS = "last_success";
+    public static final String LAST_FAILURE = "last_failure";
+    public static final String FAILURES = "failures";
+    public static final String LAST_HEARTBEAT = "last_heartbeat";
     //end
 
     private Clock clock = new SystemClock();
@@ -51,77 +55,19 @@ public class MapTaskRepository implements TaskRepository {
     }
 
 
-    public MapTaskRepository(
-            DataSource dataSource,
-            boolean commitWhenAutocommitDisabled,
-            String tableName,
-            TaskResolver taskResolver,
-            SchedulerName schedulerSchedulerName,
-            boolean orderByPriority,
-            Clock clock) {
-        this(
-                dataSource,
-                commitWhenAutocommitDisabled,
-                new AutodetectJdbcCustomization(dataSource),
-                tableName,
-                taskResolver,
-                schedulerSchedulerName,
-                Serializer.DEFAULT_JAVA_SERIALIZER,
-                orderByPriority,
-                clock);
+    public MapTaskRepository(DataSource dataSource, boolean commitWhenAutocommitDisabled, String tableName, TaskResolver taskResolver, SchedulerName schedulerSchedulerName, boolean orderByPriority, Clock clock) {
+        this(dataSource, commitWhenAutocommitDisabled, new AutodetectJdbcCustomization(dataSource), tableName, taskResolver, schedulerSchedulerName, Serializer.DEFAULT_JAVA_SERIALIZER, orderByPriority, clock);
     }
 
-    public MapTaskRepository(
-            DataSource dataSource,
-            boolean commitWhenAutocommitDisabled,
-            JdbcCustomization jdbcCustomization,
-            String tableName,
-            TaskResolver taskResolver,
-            SchedulerName schedulerSchedulerName,
-            boolean orderByPriority,
-            Clock clock) {
-        this(
-                dataSource,
-                commitWhenAutocommitDisabled,
-                jdbcCustomization,
-                tableName,
-                taskResolver,
-                schedulerSchedulerName,
-                Serializer.DEFAULT_JAVA_SERIALIZER,
-                orderByPriority,
-                clock);
+    public MapTaskRepository(DataSource dataSource, boolean commitWhenAutocommitDisabled, JdbcCustomization jdbcCustomization, String tableName, TaskResolver taskResolver, SchedulerName schedulerSchedulerName, boolean orderByPriority, Clock clock) {
+        this(dataSource, commitWhenAutocommitDisabled, jdbcCustomization, tableName, taskResolver, schedulerSchedulerName, Serializer.DEFAULT_JAVA_SERIALIZER, orderByPriority, clock);
     }
 
-    public MapTaskRepository(
-            DataSource dataSource,
-            boolean commitWhenAutocommitDisabled,
-            JdbcCustomization jdbcCustomization,
-            String tableName,
-            TaskResolver taskResolver,
-            SchedulerName schedulerSchedulerName,
-            Serializer serializer,
-            boolean orderByPriority,
-            Clock clock) {
-        this(
-                jdbcCustomization,
-                tableName,
-                taskResolver,
-                schedulerSchedulerName,
-                serializer,
-                new JdbcRunner(dataSource, commitWhenAutocommitDisabled),
-                orderByPriority,
-                clock);
+    public MapTaskRepository(DataSource dataSource, boolean commitWhenAutocommitDisabled, JdbcCustomization jdbcCustomization, String tableName, TaskResolver taskResolver, SchedulerName schedulerSchedulerName, Serializer serializer, boolean orderByPriority, Clock clock) {
+        this(jdbcCustomization, tableName, taskResolver, schedulerSchedulerName, serializer, new JdbcRunner(dataSource, commitWhenAutocommitDisabled), orderByPriority, clock);
     }
 
-    protected MapTaskRepository(
-            JdbcCustomization jdbcCustomization,
-            String tableName,
-            TaskResolver taskResolver,
-            SchedulerName schedulerSchedulerName,
-            Serializer serializer,
-            JdbcRunner jdbcRunner,
-            boolean orderByPriority,
-            Clock clock) {
+    protected MapTaskRepository(JdbcCustomization jdbcCustomization, String tableName, TaskResolver taskResolver, SchedulerName schedulerSchedulerName, Serializer serializer, JdbcRunner jdbcRunner, boolean orderByPriority, Clock clock) {
         //this.tableName = tableName;
         this.taskResolver = taskResolver;
         this.schedulerSchedulerName = schedulerSchedulerName;
@@ -135,9 +81,7 @@ public class MapTaskRepository implements TaskRepository {
 
     @Override
     public boolean createIfNotExists(SchedulableInstance<?> instance) {
-        return createIfNotExists(
-                new ScheduledTaskInstance(
-                        instance.getTaskInstance(), instance.getNextExecutionTime(clock.now())));
+        return createIfNotExists(new ScheduledTaskInstance(instance.getTaskInstance(), instance.getNextExecutionTime(clock.now())));
     }
 
     @Override
@@ -146,9 +90,7 @@ public class MapTaskRepository implements TaskRepository {
 
         Optional<Execution> existingExecution = getExecution(taskInstance);
         if (existingExecution.isPresent()) {
-            LOGGER.debug(
-                    "Execution not created, it already exists. Due: {}",
-                    existingExecution.get().executionTime);
+            LOGGER.debug("Execution not created, it already exists. Due: {}", existingExecution.get().executionTime);
             return false;
         }
 
@@ -170,8 +112,7 @@ public class MapTaskRepository implements TaskRepository {
                 LOGGER.debug("Exception when inserting execution. Assuming it to be a constraint violation.");
                 existingExecution = getExecution(taskInstance);
                 if (existingExecution.isEmpty()) {
-                    throw new TaskInstanceException(
-                            "Failed to add new execution.", instance.getTaskName(), instance.getId());
+                    throw new TaskInstanceException("Failed to add new execution.", instance.getTaskName(), instance.getId());
                 }
                 LOGGER.debug("Execution not created, another thread created it.");
                 return false;
@@ -197,6 +138,8 @@ public class MapTaskRepository implements TaskRepository {
 
     private Execution toExecution(Map<String, Object> in) {
 
+        if (in == null) return null;
+
         String taskName = (String) in.get(TASK_NAME);
 
         Resolvable resolvableTaskName = Resolvable.of(taskName, (Instant) in.get(EXECUTION_TIME));
@@ -206,19 +149,16 @@ public class MapTaskRepository implements TaskRepository {
 
         TaskInstance taskInstance = new TaskInstance(taskName, (String) in.get(TASK_INSTANCE), dataSupplier);
 
-        return new Execution((Instant) in.get(EXECUTION_TIME), taskInstance, (Boolean) in.get(PICKED), (String) in.get(PICKED_BY),
-                (Instant) in.get("last_success"), (Instant) in.get("last_failure"), (Integer) in.get("failures"),
-                (Instant) in.get("last_heartbeat"), (Long) in.get(VERSION));
+        return new Execution((Instant) in.getOrDefault(EXECUTION_TIME, Instant.now()), taskInstance, (Boolean) in.getOrDefault(PICKED, false), (String) in.get(PICKED_BY), (Instant) in.get(LAST_SUCCESS), (Instant) in.get(LAST_FAILURE), (Integer) in.get(FAILURES), (Instant) in.get(LAST_HEARTBEAT), (Long) in.get(VERSION));
     }
 
     @Override
     public List<Execution> getDue(Instant now, int limit) {
         return store.values().stream().filter(item -> {
 
-            return now.isAfter((Instant) item.get(EXECUTION_TIME))
-                    && Boolean.FALSE.equals(item.get(PICKED));
+            return now.isAfter((Instant) item.get(EXECUTION_TIME)) && Boolean.FALSE.equals(item.get(PICKED));
 
-        }).map( item -> {
+        }).map(item -> {
 
             return toExecution(item);
 
@@ -302,7 +242,8 @@ public class MapTaskRepository implements TaskRepository {
 
     @Override
     public Optional<Execution> getExecution(String taskName, String taskInstanceId) {
-        throw new RuntimeException("Not implemented");
+        Execution execution = toExecution(store.get(new ExecutionKey(taskName, taskInstanceId)));
+        return Optional.ofNullable(execution);
     }
 
     @Override

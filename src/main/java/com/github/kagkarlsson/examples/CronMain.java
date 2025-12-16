@@ -58,21 +58,31 @@ public class CronMain extends Example {
 //                                    System.out.println(Instant.now().getEpochSecond() + "s 3 -  !" + Thread.currentThread().getName());
 //                                });
 
-        final MapScheduler mapScheduler =
-                MapScheduler.create1(dataSource)
-                        .schedulerName(new SchedulerName.Fixed("Scheduler-1"))
-                        .startTasks(cronTask)
-                        .pollingInterval(Duration.ofSeconds(1))
-                        .registerShutdownHook()
-                        .build();
+        if (false) {
 
-//        final Scheduler scheduler =
-//                Scheduler.create(dataSource)
-//                        .schedulerName(new SchedulerName.Fixed("Scheduler-1"))
-//                        .startTasks(cronTask)
-//                        .pollingInterval(Duration.ofSeconds(1))
-//                        .registerShutdownHook()
-//                        .build();
+            final MapScheduler mapScheduler =
+                    MapScheduler.create1(dataSource)
+                            .schedulerName(new SchedulerName.Fixed("Scheduler-1"))
+                            .startTasks(cronTask)
+                            .pollingInterval(Duration.ofSeconds(1))
+                            .registerShutdownHook()
+                            .build();
+            mapScheduler.start();
+        } else {
+
+            final Scheduler scheduler =
+                    Scheduler.create(dataSource)
+                            .schedulerName(new SchedulerName.Fixed("Scheduler-1"))
+                            .startTasks(cronTask)
+                            .pollingInterval(Duration.ofSeconds(1))
+                            .registerShutdownHook()
+                            .build();
+            scheduler.start();
+        }
+
+
+
+
 
 //        final Scheduler scheduler1 =
 //                Scheduler.create(dataSource)
@@ -90,9 +100,9 @@ public class CronMain extends Example {
 //                        .registerShutdownHook()
 //                        .build();
 
-        mapScheduler.start();
 
-//        scheduler.start();
+
+
 //        scheduler1.start();
 //        scheduler2.start();
     }
