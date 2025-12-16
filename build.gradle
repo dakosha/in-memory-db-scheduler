@@ -1,0 +1,27 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.operationmastery.ai'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+
+    implementation 'com.github.kagkarlsson:db-scheduler:16.6.0'
+
+    implementation 'org.hsqldb:hsqldb:2.7.4'
+    implementation 'com.zaxxer:HikariCP:6.2.1'
+//    implementation 'com.h2database:h2:2.4.240'
+
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
