@@ -27,7 +27,7 @@ public abstract class Example {
         run(HsqlDatasource.initDatabase());
     }
 
-    protected void sleep(int millis) {
+    public void sleep(int millis) {
         try {
             Thread.sleep(millis);
         } catch (InterruptedException e) {

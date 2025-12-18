@@ -37,6 +37,14 @@ public class CronMain extends Example {
         new CronMain().runWithDatasource();
     }
 
+    public void sleep(int millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     @Override
     public void run(DataSource dataSource) {
 
@@ -45,7 +53,9 @@ public class CronMain extends Example {
                 Tasks.recurring("cron-task", cron)
                         .execute(
                                 (taskInstance, executionContext) -> {
-                                    System.out.println(Instant.now().getEpochSecond() + "s 1 -  !" + Thread.currentThread().getName());
+                                    System.out.println(Instant.now().getEpochSecond() + "s 1 - start !" + Thread.currentThread().getName());
+                                    sleep(1500);
+                                    System.out.println(Instant.now().getEpochSecond() + "s 1 - end !" + Thread.currentThread().getName());
                                 });
 
 
@@ -54,7 +64,9 @@ public class CronMain extends Example {
                 Tasks.recurring("cron-task-2", cron1)
                         .execute(
                                 (taskInstance, executionContext) -> {
-                                    System.out.println(Instant.now().getEpochSecond() + "s 2 -  !" + Thread.currentThread().getName());
+                                    System.out.println(Instant.now().getEpochSecond() + "s 2 - start !" + Thread.currentThread().getName());
+                                    sleep(1500);
+                                    System.out.println(Instant.now().getEpochSecond() + "s 2 - end !" + Thread.currentThread().getName());
                                 });
 
         Schedule cron2 = Schedules.cron("*/1 * * * * *");
@@ -62,7 +74,9 @@ public class CronMain extends Example {
                 Tasks.recurring("cron-task-3", cron2)
                         .execute(
                                 (taskInstance, executionContext) -> {
-                                    System.out.println(Instant.now().getEpochSecond() + "s 3 -  !" + Thread.currentThread().getName());
+                                    System.out.println(Instant.now().getEpochSecond() + "s 3 - start !" + Thread.currentThread().getName());
+                                    sleep(1500);
+                                    System.out.println(Instant.now().getEpochSecond() + "s 3 - end !" + Thread.currentThread().getName());
                                 });
 
         if (true) {
