@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import javax.swing.text.html.Option;
+import java.sql.PreparedStatement;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -30,7 +31,23 @@ public class MapTaskRepository implements TaskRepository {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(MapTaskRepository.class);
 
-    //table fields - Start
+
+
+    /*
+    task_name            varchar(100),
+    task_instance        varchar(100),
+    task_data            blob,
+    execution_time       TIMESTAMP WITH TIME ZONE,
+    picked               BIT,
+    picked_by            varchar(50),
+    last_success         TIMESTAMP WITH TIME ZONE,
+    last_failure         TIMESTAMP WITH TIME ZONE,
+    consecutive_failures INT,
+    last_heartbeat       TIMESTAMP WITH TIME ZONE,
+    version              BIGINT,
+    priority             INT,
+     */
+//table fields - Start
     public enum Fields {
         TASK_NAME("task_name"),
         TASK_INSTANCE("task_instance"),
@@ -56,22 +73,6 @@ public class MapTaskRepository implements TaskRepository {
         }
 
     }
-
-    /*
-    task_name            varchar(100),
-    task_instance        varchar(100),
-    task_data            blob,
-    execution_time       TIMESTAMP WITH TIME ZONE,
-    picked               BIT,
-    picked_by            varchar(50),
-    last_success         TIMESTAMP WITH TIME ZONE,
-    last_failure         TIMESTAMP WITH TIME ZONE,
-    consecutive_failures INT,
-    last_heartbeat       TIMESTAMP WITH TIME ZONE,
-    version              BIGINT,
-    priority             INT,
-     */
-
     //end
 
     private Clock clock = new SystemClock();
@@ -81,36 +82,16 @@ public class MapTaskRepository implements TaskRepository {
 
     private final TaskResolver taskResolver;
 
-    private final Map<ExecutionKey, Map<String, Object>> store = new ConcurrentHashMap<>();
+    private final Map<ExecutionKey, Map<String, Object>> store;
 
-    public MapTaskRepository(TaskResolver taskResolver) {
-        this.taskResolver = taskResolver;
-    }
-
-
-    public MapTaskRepository(DataSource dataSource, boolean commitWhenAutocommitDisabled, String tableName, TaskResolver taskResolver, SchedulerName schedulerSchedulerName, boolean orderByPriority, Clock clock) {
-        this(dataSource, commitWhenAutocommitDisabled, new AutodetectJdbcCustomization(dataSource), tableName, taskResolver, schedulerSchedulerName, Serializer.DEFAULT_JAVA_SERIALIZER, orderByPriority, clock);
-    }
-
-    public MapTaskRepository(DataSource dataSource, boolean commitWhenAutocommitDisabled, JdbcCustomization jdbcCustomization, String tableName, TaskResolver taskResolver, SchedulerName schedulerSchedulerName, boolean orderByPriority, Clock clock) {
-        this(dataSource, commitWhenAutocommitDisabled, jdbcCustomization, tableName, taskResolver, schedulerSchedulerName, Serializer.DEFAULT_JAVA_SERIALIZER, orderByPriority, clock);
-    }
-
-    public MapTaskRepository(DataSource dataSource, boolean commitWhenAutocommitDisabled, JdbcCustomization jdbcCustomization, String tableName, TaskResolver taskResolver, SchedulerName schedulerSchedulerName, Serializer serializer, boolean orderByPriority, Clock clock) {
-        this(jdbcCustomization, tableName, taskResolver, schedulerSchedulerName, serializer, new JdbcRunner(dataSource, commitWhenAutocommitDisabled), orderByPriority, clock);
-    }
-
-    protected MapTaskRepository(JdbcCustomization jdbcCustomization, String tableName, TaskResolver taskResolver, SchedulerName schedulerSchedulerName, Serializer serializer, JdbcRunner jdbcRunner, boolean orderByPriority, Clock clock) {
-        //this.tableName = tableName;
+    public MapTaskRepository(TaskResolver taskResolver, SchedulerName schedulerSchedulerName, Boolean orderByPriority, Map<ExecutionKey, Map<String, Object>> store) {
         this.taskResolver = taskResolver;
         this.schedulerSchedulerName = schedulerSchedulerName;
-//        this.jdbcRunner = jdbcRunner;
-//        this.serializer = serializer;
-//        this.jdbcCustomization = jdbcCustomization;
         this.orderByPriority = orderByPriority;
-        this.clock = clock;
-//        this.insertQuery = getInsertQuery(tableName);
+        this.store = store;
     }
+
+
 
     @Override
     public boolean createIfNotExists(SchedulableInstance<?> instance) {
@@ -132,25 +113,20 @@ public class MapTaskRepository implements TaskRepository {
 
         ExecutionKey key = new ExecutionKey(taskName, taskInstanceId);
 
-        synchronized (store) {
-            if (store.get(key) == null) {
+        if (store.get(key) == null) {
+            synchronized (store) {
+                if (store.get(key) == null) {
+                    Map<String, Object> taskInstanceMap = new LinkedHashMap<>();
+                    fillTask(taskInstanceMap, instance);
+                    store.put(key, taskInstanceMap);
 
-                Map<String, Object> taskInstanceMap = new LinkedHashMap<>();
-                fillTask(taskInstanceMap, instance);
-                store.put(key, taskInstanceMap);
-
-                return true;
-            } else {
-
-                LOGGER.debug("Exception when inserting execution. Assuming it to be a constraint violation.");
-                existingExecution = getExecution(taskInstance);
-                if (existingExecution.isEmpty()) {
-                    throw new TaskInstanceException("Failed to add new execution.", instance.getTaskName(), instance.getId());
+                    return true;
+                } else {
+                    return false;
                 }
-                LOGGER.debug("Execution not created, another thread created it.");
-                return false;
-
             }
+        } else {
+            return false;
         }
     }
 
@@ -271,57 +247,75 @@ public class MapTaskRepository implements TaskRepository {
     @Override
     public boolean reschedule(Execution execution, Instant nextExecutionTime, Object newData, Instant lastSuccess, Instant lastFailure, int consecutiveFailures) {
 
-        synchronized (store) {
-            ExecutionKey key = new ExecutionKey(execution.getTaskName(), execution.taskInstance.getId());
+        ExecutionKey key = new ExecutionKey(execution.getTaskName(), execution.taskInstance.getId());
+        Map<String, Object> item = store.get(key);
 
-            Map<String, Object> item = store.get(key);
+        if (item != null) {
+            synchronized (item) {
+                if ((Long) item.getOrDefault(VERSION.getFieldName(), 0L) == execution.version) {
+                    item.put(PICKED.getFieldName(), false);
+                    item.put(PICKED_BY.getFieldName(), "");
+                    item.put(LAST_HEARTBEAT.getFieldName(), Instant.MIN);
+                    item.put(LAST_SUCCESS.getFieldName(), lastSuccess);
+                    item.put(LAST_FAILURE.getFieldName(), lastFailure);
+                    item.put(CONSECUTIVE_FAILURES.getFieldName(), consecutiveFailures);
+                    item.put(EXECUTION_TIME.getFieldName(), nextExecutionTime);
+                    if (newData != null) {
+                        item.put(TASK_DATA.getFieldName(), newData);
+                    }
+                    item.put(VERSION.getFieldName(), ((Long) item.getOrDefault(VERSION.getFieldName(), 0)) + 1L);
 
-            if ((Long) item.getOrDefault(VERSION.getFieldName(), 0L) == execution.version) {
-                item.put(PICKED.getFieldName(), false);
-                item.put(PICKED_BY.getFieldName(), "");
-                item.put(LAST_HEARTBEAT.getFieldName(), Instant.MIN);
-                item.put(LAST_SUCCESS.getFieldName(), lastSuccess);
-                item.put(LAST_FAILURE.getFieldName(), lastFailure);
-                item.put(CONSECUTIVE_FAILURES.getFieldName(), consecutiveFailures);
-                item.put(EXECUTION_TIME.getFieldName(), nextExecutionTime);
-                if (newData != null) {
-                    item.put(TASK_DATA.getFieldName(), newData);
+                    return true;
+                } else {
+                    return false;
                 }
-                item.put(VERSION.getFieldName(), ((Long) item.getOrDefault(VERSION.getFieldName(), 0)) + 1L);
-
-                return true;
-            } else {
-                return false;
             }
-
+        } else {
+            return false;
         }
     }
 
     @Override
     public Optional<Execution> pick(Execution e, Instant timePicked) {
 
-        synchronized (store) {
-            ExecutionKey key = new ExecutionKey(e.getTaskName(), e.taskInstance.getId());
-            Map<String, Object> execution = store.get(key);
+        ExecutionKey key = new ExecutionKey(e.getTaskName(), e.taskInstance.getId());
+        Map<String, Object> execution = store.get(key);
 
-            if ((Boolean) execution.getOrDefault(PICKED.getFieldName(), false) == false) {
-                if ((Long)execution.getOrDefault(VERSION.getFieldName(), 0L) == e.version) {
-                    execution.put(PICKED.getFieldName(), true);
-                    execution.put(PICKED_BY.getFieldName(), truncate(schedulerSchedulerName.getName(), 50));
-                    execution.put(LAST_HEARTBEAT.getFieldName(), timePicked);
-                    execution.put(VERSION.getFieldName(), ((Long) execution.getOrDefault(VERSION.getFieldName(), 0)) + 1L);
+        if (execution != null) {
+            synchronized (execution) {
+                if ((Boolean) execution.getOrDefault(PICKED.getFieldName(), false) == false) {
+                    if ((Long)execution.getOrDefault(VERSION.getFieldName(), 0L) == e.version) {
+                        execution.put(PICKED.getFieldName(), true);
+                        execution.put(PICKED_BY.getFieldName(), truncate(schedulerSchedulerName.getName(), 50));
+                        execution.put(LAST_HEARTBEAT.getFieldName(), timePicked);
+                        execution.put(VERSION.getFieldName(), ((Long) execution.getOrDefault(VERSION.getFieldName(), 0)) + 1L);
 
-                    return Optional.of(toExecution(execution));
+                        return Optional.of(toExecution(execution));
+                    }
                 }
-            }
 
+                return Optional.empty();
+            }
+        } else {
             return Optional.empty();
         }
     }
 
     @Override
     public List<Execution> getDeadExecutions(Instant olderThan) {
-        throw new RuntimeException("Not implemented");
+
+        synchronized (store) {
+            return store.values().stream()
+                    .filter(item -> {
+                        Instant last_heartbeat = (Instant) item.getOrDefault(LAST_HEARTBEAT, Instant.MIN);
+                        Boolean picked = (Boolean) item.getOrDefault(PICKED.getFieldName(), false);
+                        return picked && last_heartbeat.isBefore(olderThan);
+                    })
+                    .map(item -> {
+                        return toExecution(item);
+                    })
+                    .toList();
+        }
     }
 
     @Override

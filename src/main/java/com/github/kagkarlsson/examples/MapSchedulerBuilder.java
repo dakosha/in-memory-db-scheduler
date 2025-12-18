@@ -69,6 +69,8 @@ public class MapSchedulerBuilder {
     protected boolean alwaysPersistTimestampInUTC = false;
     protected List<SchedulerListener> schedulerListeners = new ArrayList<>();
     protected List<ExecutionInterceptor> executionInterceptors = new ArrayList<>();
+    protected TaskRepository taskRepository;
+    protected TaskResolver taskResolver;
 
     public MapSchedulerBuilder(DataSource dataSource, List<Task<?>> knownTasks) {
         this.dataSource = dataSource;
@@ -230,41 +232,20 @@ public class MapSchedulerBuilder {
         return this;
     }
 
+    public MapSchedulerBuilder repository(TaskRepository repository) {
+        this.taskRepository = repository;
+        return this;
+    }
+
+    public MapSchedulerBuilder taskResolver(TaskResolver resolver) {
+        this.taskResolver = resolver;
+        return this;
+    }
+
     public MapScheduler build() {
         if (schedulerName == null) {
             schedulerName = new SchedulerName.Hostname();
         }
-
-        final TaskResolver taskResolver =
-                new TaskResolver(new SchedulerListeners(schedulerListeners), clock, knownTasks);
-        final JdbcCustomization jdbcCustomization =
-                ofNullable(this.jdbcCustomization)
-                        .orElseGet(
-                                () -> new AutodetectJdbcCustomization(dataSource, alwaysPersistTimestampInUTC));
-
-        MapTaskRepository mapTaskRepository = new MapTaskRepository(
-                dataSource,
-                true,
-                jdbcCustomization,
-                tableName,
-                taskResolver,
-                schedulerName,
-                serializer,
-                enablePriority,
-                clock
-        );
-
-        final MapTaskRepository clientTaskRepository =
-                new MapTaskRepository(
-                        dataSource,
-                        commitWhenAutocommitDisabled,
-                        jdbcCustomization,
-                        tableName,
-                        taskResolver,
-                        schedulerName,
-                        serializer,
-                        enablePriority,
-                        clock);
 
         ExecutorService candidateExecutorService = executorService;
         if (candidateExecutorService == null) {
@@ -306,8 +287,8 @@ public class MapSchedulerBuilder {
         final MapScheduler scheduler =
                 new MapScheduler(
                         clock,
-                        mapTaskRepository,
-                        clientTaskRepository,
+                        taskRepository,
+                        taskRepository,
                         taskResolver,
                         executorThreads,
                         candidateExecutorService,

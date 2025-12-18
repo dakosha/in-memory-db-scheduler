@@ -14,14 +14,21 @@
 package com.github.kagkarlsson.examples;
 
 import com.github.kagkarlsson.examples.helpers.Example;
-import com.github.kagkarlsson.scheduler.Scheduler;
-import com.github.kagkarlsson.scheduler.SchedulerName;
+import com.github.kagkarlsson.scheduler.*;
+import com.github.kagkarlsson.scheduler.event.SchedulerListener;
+import com.github.kagkarlsson.scheduler.event.SchedulerListeners;
+import com.github.kagkarlsson.scheduler.task.Task;
 import com.github.kagkarlsson.scheduler.task.helper.RecurringTask;
 import com.github.kagkarlsson.scheduler.task.helper.Tasks;
 import com.github.kagkarlsson.scheduler.task.schedule.Schedule;
 import com.github.kagkarlsson.scheduler.task.schedule.Schedules;
+
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import javax.sql.DataSource;
 
 public class CronMain extends Example {
@@ -60,12 +67,47 @@ public class CronMain extends Example {
 
         if (true) {
 
+            Map<ExecutionKey, Map<String, Object>> store = new ConcurrentHashMap<>();
+
+            Clock clock = new SystemClock();
+
+            List<Task<?>> tasks = new ArrayList<Task<?>>();
+            tasks.add(cronTask);
+            tasks.add(cronTask1);
+            tasks.add(cronTask2);
+
+            final TaskResolver taskResolver =
+                    new TaskResolver(new SchedulerListeners(SchedulerListener.NOOP), clock, tasks);
+
+            TaskRepository repo1 = new MapTaskRepository(
+                    taskResolver,
+                    new SchedulerName.Fixed("Scheduler-1"),
+                    false,
+                    store
+            );
+
+            TaskRepository repo2 = new MapTaskRepository(
+                    taskResolver,
+                    new SchedulerName.Fixed("Scheduler-2"),
+                    false,
+                    store
+            );
+
+            TaskRepository repo3 = new MapTaskRepository(
+                    taskResolver,
+                    new SchedulerName.Fixed("Scheduler-3"),
+                    false,
+                    store
+            );
+
             final MapScheduler mapScheduler =
                     MapScheduler.create1(dataSource)
                             .schedulerName(new SchedulerName.Fixed("Scheduler-1"))
                             .startTasks(cronTask, cronTask1, cronTask2)
                             .pollingInterval(Duration.ofSeconds(1))
                             .registerShutdownHook()
+                            .taskResolver(taskResolver)
+                            .repository(repo1)
                             .build();
 
             final MapScheduler mapScheduler2 =
@@ -74,10 +116,23 @@ public class CronMain extends Example {
                             .startTasks(cronTask, cronTask1, cronTask2)
                             .pollingInterval(Duration.ofSeconds(1))
                             .registerShutdownHook()
+                            .taskResolver(taskResolver)
+                            .repository(repo2)
+                            .build();
+
+            final MapScheduler mapScheduler3 =
+                    MapScheduler.create1(dataSource)
+                            .schedulerName(new SchedulerName.Fixed("Scheduler-3"))
+                            .startTasks(cronTask, cronTask1, cronTask2)
+                            .pollingInterval(Duration.ofSeconds(1))
+                            .registerShutdownHook()
+                            .taskResolver(taskResolver)
+                            .repository(repo3)
                             .build();
 
             mapScheduler.start();
             mapScheduler2.start();
+            mapScheduler3.start();
         } else {
 
             final Scheduler scheduler =
