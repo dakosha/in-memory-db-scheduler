@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
+import javax.swing.text.html.Option;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -22,23 +23,55 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static com.github.kagkarlsson.examples.MapTaskRepository.Fields.*;
+import static com.github.kagkarlsson.scheduler.StringUtils.truncate;
+
 public class MapTaskRepository implements TaskRepository {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(MapTaskRepository.class);
 
     //table fields - Start
-    public static final String TASK_NAME = "task_name";
-    public static final String TASK_INSTANCE = "task_instance";
-    public static final String TASK_DATA = "task_data";
-    public static final String EXECUTION_TIME = "execution_time";
-    public static final String PICKED = "picked";
-    public static final String PICKED_BY = "picked_by";
-    public static final String VERSION = "version";
-    public static final String PRIORITY = "priority";
-    public static final String LAST_SUCCESS = "last_success";
-    public static final String LAST_FAILURE = "last_failure";
-    public static final String FAILURES = "failures";
-    public static final String LAST_HEARTBEAT = "last_heartbeat";
+    public enum Fields {
+        TASK_NAME("task_name"),
+        TASK_INSTANCE("task_instance"),
+        TASK_DATA("task_data"),
+        EXECUTION_TIME("execution_time"),
+        PICKED("picked"),
+        PICKED_BY("picked_by"),
+        LAST_SUCCESS("last_success"),
+        LAST_FAILURE("last_failure"),
+        CONSECUTIVE_FAILURES("consecutive_failures"),
+        LAST_HEARTBEAT("last_heartbeat"),
+        VERSION("version"),
+        PRIORITY("priority");
+
+        private Fields(String fieldName) {
+            this.fieldName = fieldName;
+        }
+
+        private String fieldName;
+
+        public String getFieldName() {
+            return fieldName;
+        }
+
+    }
+
+    /*
+    task_name            varchar(100),
+    task_instance        varchar(100),
+    task_data            blob,
+    execution_time       TIMESTAMP WITH TIME ZONE,
+    picked               BIT,
+    picked_by            varchar(50),
+    last_success         TIMESTAMP WITH TIME ZONE,
+    last_failure         TIMESTAMP WITH TIME ZONE,
+    consecutive_failures INT,
+    last_heartbeat       TIMESTAMP WITH TIME ZONE,
+    version              BIGINT,
+    priority             INT,
+     */
+
     //end
 
     private Clock clock = new SystemClock();
@@ -124,15 +157,15 @@ public class MapTaskRepository implements TaskRepository {
     private void fillTask(Map<String, Object> taskInstanceMap, ScheduledTaskInstance instance) {
         TaskInstance<?> taskInstance = instance.getTaskInstance();
 
-        taskInstanceMap.put(TASK_NAME, taskInstance.getTaskName());
-        taskInstanceMap.put(TASK_INSTANCE, taskInstance.getId());
-        taskInstanceMap.put(TASK_DATA, taskInstance.getData());
-        taskInstanceMap.put(EXECUTION_TIME, instance.getExecutionTime());
-        taskInstanceMap.put(PICKED, false);
-        taskInstanceMap.put(VERSION, 1L);
+        taskInstanceMap.put(TASK_NAME.getFieldName(), taskInstance.getTaskName());
+        taskInstanceMap.put(TASK_INSTANCE.getFieldName(), taskInstance.getId());
+        taskInstanceMap.put(TASK_DATA.getFieldName(), taskInstance.getData());
+        taskInstanceMap.put(EXECUTION_TIME.getFieldName(), instance.getExecutionTime());
+        taskInstanceMap.put(PICKED.getFieldName(), false);
+        taskInstanceMap.put(VERSION.getFieldName(), 1L);
 
         if (orderByPriority) {
-            taskInstanceMap.put(PRIORITY, taskInstance.getPriority());
+            taskInstanceMap.put(PRIORITY.getFieldName(), taskInstance.getPriority());
         }
     }
 
@@ -140,23 +173,48 @@ public class MapTaskRepository implements TaskRepository {
 
         if (in == null) return null;
 
-        String taskName = (String) in.get(TASK_NAME);
+        String taskName = (String) in.get(TASK_NAME.getFieldName());
 
-        Resolvable resolvableTaskName = Resolvable.of(taskName, (Instant) in.get(EXECUTION_TIME));
+        Resolvable resolvableTaskName = Resolvable.of(taskName, (Instant) in.get(EXECUTION_TIME.getFieldName()));
 
         Optional<Task> task = taskResolver.resolve(resolvableTaskName);
         Supplier dataSupplier = () -> null;
 
-        TaskInstance taskInstance = new TaskInstance(taskName, (String) in.get(TASK_INSTANCE), dataSupplier);
+        TaskInstance taskInstance = new TaskInstance(taskName, (String) in.get(TASK_INSTANCE.getFieldName()), dataSupplier);
 
-        return new Execution((Instant) in.getOrDefault(EXECUTION_TIME, Instant.now()), taskInstance, (Boolean) in.getOrDefault(PICKED, false), (String) in.get(PICKED_BY), (Instant) in.get(LAST_SUCCESS), (Instant) in.get(LAST_FAILURE), (Integer) in.get(FAILURES), (Instant) in.get(LAST_HEARTBEAT), (Long) in.get(VERSION));
+        /*
+        TASK_NAME("task_name"),
+        TASK_INSTANCE("task_instance"),
+        TASK_DATA("task_data"),
+        EXECUTION_TIME("execution_time"),
+        PICKED("picked"),
+        PICKED_BY("picked_by"),
+        LAST_SUCCESS("last_success"),
+        LAST_FAILURE("last_failure"),
+        CONSECUTIVE_FAILURES("consecutive_failures"),
+        LAST_HEARTBEAT("last_heartbeat"),
+        VERSION("version"),
+        PRIORITY("priority");
+         */
+
+        return new Execution(
+                (Instant) in.getOrDefault(EXECUTION_TIME.getFieldName(), Instant.now()),
+                taskInstance,
+                (Boolean) in.getOrDefault(PICKED.getFieldName(), false),
+                (String) in.getOrDefault(PICKED_BY.getFieldName(), ""),
+                (Instant) in.getOrDefault(LAST_SUCCESS.getFieldName(), Instant.MIN),
+                (Instant) in.getOrDefault(LAST_FAILURE.getFieldName(), Instant.MIN),
+                (Integer) in.getOrDefault(CONSECUTIVE_FAILURES.getFieldName(), 0),
+                (Instant) in.getOrDefault(LAST_HEARTBEAT.getFieldName(), Instant.MIN),
+                (Long) in.getOrDefault(VERSION.getFieldName(), 0)
+        );
     }
 
     @Override
     public List<Execution> getDue(Instant now, int limit) {
         return store.values().stream().filter(item -> {
 
-            return now.isAfter((Instant) item.get(EXECUTION_TIME)) && Boolean.FALSE.equals(item.get(PICKED));
+            return now.isAfter((Instant) item.get(EXECUTION_TIME.getFieldName())) && Boolean.FALSE.equals(item.get(PICKED.getFieldName()));
 
         }).map(item -> {
 
@@ -207,17 +265,58 @@ public class MapTaskRepository implements TaskRepository {
 
     @Override
     public boolean reschedule(Execution execution, Instant nextExecutionTime, Instant lastSuccess, Instant lastFailure, int consecutiveFailures) {
-        throw new RuntimeException("Not implemented");
+        return reschedule(execution, nextExecutionTime, null, lastSuccess, lastFailure, consecutiveFailures);
     }
 
     @Override
     public boolean reschedule(Execution execution, Instant nextExecutionTime, Object newData, Instant lastSuccess, Instant lastFailure, int consecutiveFailures) {
-        throw new RuntimeException("Not implemented");
+
+        synchronized (store) {
+            ExecutionKey key = new ExecutionKey(execution.getTaskName(), execution.taskInstance.getId());
+
+            Map<String, Object> item = store.get(key);
+
+            if ((Long) item.getOrDefault(VERSION.getFieldName(), 0L) == execution.version) {
+                item.put(PICKED.getFieldName(), false);
+                item.put(PICKED_BY.getFieldName(), "");
+                item.put(LAST_HEARTBEAT.getFieldName(), Instant.MIN);
+                item.put(LAST_SUCCESS.getFieldName(), lastSuccess);
+                item.put(LAST_FAILURE.getFieldName(), lastFailure);
+                item.put(CONSECUTIVE_FAILURES.getFieldName(), consecutiveFailures);
+                item.put(EXECUTION_TIME.getFieldName(), nextExecutionTime);
+                if (newData != null) {
+                    item.put(TASK_DATA.getFieldName(), newData);
+                }
+                item.put(VERSION.getFieldName(), ((Long) item.getOrDefault(VERSION.getFieldName(), 0)) + 1L);
+
+                return true;
+            } else {
+                return false;
+            }
+
+        }
     }
 
     @Override
     public Optional<Execution> pick(Execution e, Instant timePicked) {
-        throw new RuntimeException("Not implemented");
+
+        synchronized (store) {
+            ExecutionKey key = new ExecutionKey(e.getTaskName(), e.taskInstance.getId());
+            Map<String, Object> execution = store.get(key);
+
+            if ((Boolean) execution.getOrDefault(PICKED.getFieldName(), false) == false) {
+                if ((Long)execution.getOrDefault(VERSION.getFieldName(), 0L) == e.version) {
+                    execution.put(PICKED.getFieldName(), true);
+                    execution.put(PICKED_BY.getFieldName(), truncate(schedulerSchedulerName.getName(), 50));
+                    execution.put(LAST_HEARTBEAT.getFieldName(), timePicked);
+                    execution.put(VERSION.getFieldName(), ((Long) execution.getOrDefault(VERSION.getFieldName(), 0)) + 1L);
+
+                    return Optional.of(toExecution(execution));
+                }
+            }
+
+            return Optional.empty();
+        }
     }
 
     @Override

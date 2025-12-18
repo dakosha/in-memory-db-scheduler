@@ -42,32 +42,42 @@ public class CronMain extends Example {
                                 });
 
 
-//        Schedule cron1 = Schedules.cron("*/1 * * * * *");
-//        RecurringTask<Void> cronTask1 =
-//                Tasks.recurring("cron-task-2", cron1)
-//                        .execute(
-//                                (taskInstance, executionContext) -> {
-//                                    System.out.println(Instant.now().getEpochSecond() + "s 2 -  !" + Thread.currentThread().getName());
-//                                });
-//
-//        Schedule cron2 = Schedules.cron("*/1 * * * * *");
-//        RecurringTask<Void> cronTask2 =
-//                Tasks.recurring("cron-task-3", cron2)
-//                        .execute(
-//                                (taskInstance, executionContext) -> {
-//                                    System.out.println(Instant.now().getEpochSecond() + "s 3 -  !" + Thread.currentThread().getName());
-//                                });
+        Schedule cron1 = Schedules.cron("*/1 * * * * *");
+        RecurringTask<Void> cronTask1 =
+                Tasks.recurring("cron-task-2", cron1)
+                        .execute(
+                                (taskInstance, executionContext) -> {
+                                    System.out.println(Instant.now().getEpochSecond() + "s 2 -  !" + Thread.currentThread().getName());
+                                });
 
-        if (false) {
+        Schedule cron2 = Schedules.cron("*/1 * * * * *");
+        RecurringTask<Void> cronTask2 =
+                Tasks.recurring("cron-task-3", cron2)
+                        .execute(
+                                (taskInstance, executionContext) -> {
+                                    System.out.println(Instant.now().getEpochSecond() + "s 3 -  !" + Thread.currentThread().getName());
+                                });
+
+        if (true) {
 
             final MapScheduler mapScheduler =
                     MapScheduler.create1(dataSource)
                             .schedulerName(new SchedulerName.Fixed("Scheduler-1"))
-                            .startTasks(cronTask)
+                            .startTasks(cronTask, cronTask1, cronTask2)
                             .pollingInterval(Duration.ofSeconds(1))
                             .registerShutdownHook()
                             .build();
+
+            final MapScheduler mapScheduler2 =
+                    MapScheduler.create1(dataSource)
+                            .schedulerName(new SchedulerName.Fixed("Scheduler-2"))
+                            .startTasks(cronTask, cronTask1, cronTask2)
+                            .pollingInterval(Duration.ofSeconds(1))
+                            .registerShutdownHook()
+                            .build();
+
             mapScheduler.start();
+            mapScheduler2.start();
         } else {
 
             final Scheduler scheduler =

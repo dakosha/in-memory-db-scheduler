@@ -28,9 +28,9 @@ public class HsqlDatasource {
 
     public static DataSource initDatabase() {
         HikariConfig config = new HikariConfig();
-//        config.setJdbcUrl("jdbc:h2:data/test");
+        config.setJdbcUrl("jdbc:hsqldb:mem:schedule_testing");
 //        config.setJdbcUrl("jdbc:hsqldb:file:./schedule_testing_db;shutdown=true");
-        config.setJdbcUrl("jdbc:hsqldb:file:./schedule_testing_db;hsqldb.sqllog=3;shutdown=true");
+//        config.setJdbcUrl("jdbc:hsqldb:file:./schedule_testing_db;hsqldb.sqllog=3;shutdown=true");
         config.setUsername("sa");
         config.setPassword("");
 
