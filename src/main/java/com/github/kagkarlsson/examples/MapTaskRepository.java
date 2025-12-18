@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -118,6 +119,9 @@ public class MapTaskRepository implements TaskRepository {
                 if (store.get(key) == null) {
                     Map<String, Object> taskInstanceMap = new LinkedHashMap<>();
                     fillTask(taskInstanceMap, instance);
+
+                    taskInstanceMap.put("lock", new ReentrantLock());
+
                     store.put(key, taskInstanceMap);
 
                     return true;
@@ -157,21 +161,6 @@ public class MapTaskRepository implements TaskRepository {
         Supplier dataSupplier = () -> null;
 
         TaskInstance taskInstance = new TaskInstance(taskName, (String) in.get(TASK_INSTANCE.getFieldName()), dataSupplier);
-
-        /*
-        TASK_NAME("task_name"),
-        TASK_INSTANCE("task_instance"),
-        TASK_DATA("task_data"),
-        EXECUTION_TIME("execution_time"),
-        PICKED("picked"),
-        PICKED_BY("picked_by"),
-        LAST_SUCCESS("last_success"),
-        LAST_FAILURE("last_failure"),
-        CONSECUTIVE_FAILURES("consecutive_failures"),
-        LAST_HEARTBEAT("last_heartbeat"),
-        VERSION("version"),
-        PRIORITY("priority");
-         */
 
         return new Execution(
                 (Instant) in.getOrDefault(EXECUTION_TIME.getFieldName(), Instant.now()),
@@ -254,25 +243,36 @@ public class MapTaskRepository implements TaskRepository {
         Map<String, Object> item = store.get(key);
 
         if (item != null) {
-            synchronized (item) {
-                if ((Long) item.getOrDefault(VERSION.getFieldName(), 0L) == execution.version) {
-                    item.put(PICKED.getFieldName(), false);
-                    item.put(PICKED_BY.getFieldName(), "");
-                    item.put(LAST_HEARTBEAT.getFieldName(), Instant.MIN);
-                    item.put(LAST_SUCCESS.getFieldName(), lastSuccess);
-                    item.put(LAST_FAILURE.getFieldName(), lastFailure);
-                    item.put(CONSECUTIVE_FAILURES.getFieldName(), consecutiveFailures);
-                    item.put(EXECUTION_TIME.getFieldName(), nextExecutionTime);
-                    if (newData != null) {
-                        item.put(TASK_DATA.getFieldName(), newData);
-                    }
-                    item.put(VERSION.getFieldName(), ((Long) item.getOrDefault(VERSION.getFieldName(), 0)) + 1L);
 
-                    return true;
-                } else {
-                    return false;
+            ReentrantLock lock = (ReentrantLock) item.get("lock");
+
+            if (lock.tryLock()) {
+                try {
+                    if ((Long) item.getOrDefault(VERSION.getFieldName(), 0L) == execution.version) {
+                        item.put(PICKED.getFieldName(), false);
+                        item.put(PICKED_BY.getFieldName(), "");
+                        item.put(LAST_HEARTBEAT.getFieldName(), Instant.MIN);
+                        item.put(LAST_SUCCESS.getFieldName(), lastSuccess);
+                        item.put(LAST_FAILURE.getFieldName(), lastFailure);
+                        item.put(CONSECUTIVE_FAILURES.getFieldName(), consecutiveFailures);
+                        item.put(EXECUTION_TIME.getFieldName(), nextExecutionTime);
+                        if (newData != null) {
+                            item.put(TASK_DATA.getFieldName(), newData);
+                        }
+                        item.put(VERSION.getFieldName(), ((Long) item.getOrDefault(VERSION.getFieldName(), 0)) + 1L);
+
+                        return true;
+                    } else {
+                        return false;
+                    }
+                } finally {
+                    lock.unlock();
                 }
+
+            } else {
+                return false;
             }
+
         } else {
             return false;
         }
@@ -285,20 +285,29 @@ public class MapTaskRepository implements TaskRepository {
         Map<String, Object> execution = store.get(key);
 
         if (execution != null) {
-            synchronized (execution) {
-                if ((Boolean) execution.getOrDefault(PICKED.getFieldName(), false) == false) {
-                    if ((Long)execution.getOrDefault(VERSION.getFieldName(), 0L) == e.version) {
-                        execution.put(PICKED.getFieldName(), true);
-                        execution.put(PICKED_BY.getFieldName(), truncate(schedulerSchedulerName.getName(), 50));
-                        execution.put(LAST_HEARTBEAT.getFieldName(), timePicked);
-                        execution.put(VERSION.getFieldName(), ((Long) execution.getOrDefault(VERSION.getFieldName(), 0)) + 1L);
 
-                        return Optional.of(toExecution(execution));
+            ReentrantLock lock = (ReentrantLock) execution.get("lock");
+
+            if (lock.tryLock()) {
+                try {
+                    if ((Boolean) execution.getOrDefault(PICKED.getFieldName(), false) == false) {
+                        if ((Long)execution.getOrDefault(VERSION.getFieldName(), 0L) == e.version) {
+                            execution.put(PICKED.getFieldName(), true);
+                            execution.put(PICKED_BY.getFieldName(), truncate(schedulerSchedulerName.getName(), 50));
+                            execution.put(LAST_HEARTBEAT.getFieldName(), timePicked);
+                            execution.put(VERSION.getFieldName(), ((Long) execution.getOrDefault(VERSION.getFieldName(), 0)) + 1L);
+
+                            return Optional.of(toExecution(execution));
+                        }
                     }
-                }
 
-                return Optional.empty();
+                    return Optional.empty();
+                } finally {
+                    lock.unlock();
+                }
             }
+
+            return Optional.empty();
         } else {
             return Optional.empty();
         }
