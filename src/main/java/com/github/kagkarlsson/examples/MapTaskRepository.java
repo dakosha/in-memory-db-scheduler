@@ -188,15 +188,18 @@ public class MapTaskRepository implements TaskRepository {
 
     @Override
     public List<Execution> getDue(Instant now, int limit) {
-        return store.values().stream().filter(item -> {
+        synchronized (store) {
+            return store.values().stream().filter(item -> {
+                Instant execTime = (Instant) item.get(EXECUTION_TIME.getFieldName());
+                Boolean picked = (Boolean) item.get(PICKED.getFieldName());
+                return now.isAfter(execTime) && Boolean.FALSE.equals(picked);
 
-            return now.isAfter((Instant) item.get(EXECUTION_TIME.getFieldName())) && Boolean.FALSE.equals(item.get(PICKED.getFieldName()));
+            }).map(item -> {
 
-        }).map(item -> {
+                return toExecution(item);
 
-            return toExecution(item);
-
-        }).collect(Collectors.toList());
+            }).collect(Collectors.toList());
+        }
     }
 
     @Override
